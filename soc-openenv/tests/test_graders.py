@@ -41,7 +41,7 @@ def test_grade_returns_float(task_id):
 def test_perfect_easy_agent_scores_high():
     """Agent that correctly classifies all alerts should score > 0.5."""
     from soc_env.graders import grade_task_easy
-    from soc_env.scenarios.easy_scenarios import _ALERTS
+    from scenarios.easy_scenarios import _ALERTS
     env = SOCEnv(task_id="alert_triage", seed=42); env.reset()
     s = env._state
     for alert in _ALERTS:
