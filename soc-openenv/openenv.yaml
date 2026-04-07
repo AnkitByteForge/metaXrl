@@ -1,0 +1,72 @@
+name: soc-incident-response
+version: "1.0.0"
+description: >
+  A Security Operations Center (SOC) environment where an AI agent acts as a
+  tier-1 analyst. The agent triages SIEM alerts, reconstructs attack chains
+  using the MITRE ATT&CK framework, isolates compromised endpoints, and
+  manages real business constraints during active incidents.
+author: "Ankit Kumar & Jayanth"
+tags:
+  - openenv
+  - cybersecurity
+  - soc
+  - incident-response
+  - mitre-attack
+  - real-world
+
+tasks:
+  - id: alert_triage
+    name: "Alert triage (easy)"
+    description: >
+      Given a single SIEM alert with indicators of compromise, classify it as
+      true positive or false positive and recommend the correct immediate action.
+    difficulty: easy
+    max_steps: 10
+    score_range: [0.0, 1.0]
+
+  - id: attack_chain_reconstruction
+    name: "Attack chain reconstruction (medium)"
+    description: >
+      Correlate 15 alerts across 4 hosts over a 2-hour window. Identify the
+      full MITRE ATT&CK kill chain, locate patient zero, and contain the threat
+      before it reaches the crown jewel asset.
+    difficulty: medium
+    max_steps: 25
+    score_range: [0.0, 1.0]
+
+  - id: constrained_incident_response
+    name: "Constrained incident response (hard)"
+    description: >
+      Respond to an active breach with business constraints: CEO laptop involved
+      cannot isolate, domain controller at risk, legal hold required, and a
+      customer-facing API is degrading. Balance security, business continuity,
+      and compliance simultaneously.
+    difficulty: hard
+    max_steps: 40
+    score_range: [0.0, 1.0]
+
+observation_space:
+  type: object
+  description: >
+    Structured snapshot of the SOC environment at each step. Contains the
+    current alert queue, network topology state, active sessions, investigation
+    history, and any business constraint flags.
+
+action_space:
+  type: object
+  description: >
+    Seven analyst actions: enrich_alert, correlate_alerts, isolate_endpoint,
+    disable_account, collect_forensics, escalate_to_tier2, create_ticket.
+
+reward:
+  type: float
+  range: [-1.0, 1.0]
+  description: >
+    Dense reward signal. Positive for correct classifications, chain coverage,
+    and successful containment. Negative for false positive isolations,
+    missed true positives, and per-minute dwell time penalties.
+
+endpoints:
+  reset: POST /reset
+  step: POST /step
+  state: GET /state
