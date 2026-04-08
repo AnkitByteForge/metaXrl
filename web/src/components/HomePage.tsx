@@ -40,7 +40,7 @@ const actions: Action[] = [
 function HomePage() {
   const [busyTask, setBusyTask] = useState<Action["taskId"] | null>(null);
   const [resultText, setResultText] = useState<string>("");
-  const apiBase = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:7860";
+  const apiBase = import.meta.env.VITE_API_BASE_URL ?? window.location.origin;
 
   const buildActionPayload = (taskId: Action["taskId"], resetData: ResetResponse) => {
     const firstAlertId = resetData.active_alerts?.[0]?.alert_id ?? "ALT-001";

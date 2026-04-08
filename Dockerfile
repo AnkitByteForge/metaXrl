@@ -1,3 +1,12 @@
+# Build stage for React frontend
+FROM node:20-slim AS frontend-builder
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm install --legacy-peer-deps
+COPY web/ .
+RUN npm run build
+
+# Python backend stage
 FROM python:3.11-slim
 
 LABEL maintainer="Ankit Kumar & Jayanth"
@@ -11,6 +20,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+
+# Copy built frontend from builder stage
+COPY --from=frontend-builder /web/dist /app/web/dist
 
 RUN pip install --no-cache-dir -e . --no-deps
 

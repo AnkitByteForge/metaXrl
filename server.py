@@ -9,9 +9,12 @@ Endpoints:
   POST /grade   -> {task_id, score, breakdown}
 """
 import os
+from pathlib import Path
 from typing import Dict, Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -50,11 +53,16 @@ class StepRequest(BaseModel):
 
 @app.get("/")
 def root():
+    """Serve React frontend."""
+    static_dir = Path(__file__).parent / "web" / "dist"
+    index_file = static_dir / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
     return {"name": "SOC Incident Response OpenEnv", "version": "1.0.0",
             "tasks": SOCEnv.TASK_IDS, "docs": "/docs"}
 
 
-@app.get("/tasks")
+@app.get("/api/tasks")
 def list_tasks():
     return {"tasks": [
         {"id": "alert_triage",                   "difficulty": "easy",   "max_steps": 10},
@@ -105,6 +113,29 @@ def grade(task_id: str = "alert_triage"):
     else:
         breakdown, score = grade_task_hard_detailed(s)
     return {"task_id": task_id, "score": round(score, 4), "breakdown": breakdown}
+
+
+# Updated catch-all route to exclude static file requests
+@app.get("/{path_name:path}")
+def serve_frontend(path_name: str):
+    """Catch-all route to serve React app for client-side routing."""
+    static_dir = Path(__file__).parent / "web" / "dist"
+    index_file = static_dir / "index.html"
+
+    # Exclude static file requests
+    if (static_dir / path_name).exists():
+        return FileResponse(static_dir / path_name)
+
+    if index_file.exists():
+        return FileResponse(index_file)
+    return {"error": "Frontend not built. Run: cd web && npm run build"}
+
+
+# Mount static assets from dist (this runs before catch-all due to FastAPI routing order)
+static_dir = Path(__file__).parent / "web" / "dist"
+if static_dir.exists():
+    # Mount assets subdirectory
+    app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
 
 
 if __name__ == "__main__":
