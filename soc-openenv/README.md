@@ -102,6 +102,15 @@ python server.py
 # API docs at http://localhost:7860/docs
 ```
 
+### Run the web UI (React + TypeScript)
+
+```bash
+cd web
+npm install
+npm run dev
+# UI at http://localhost:5173
+```
+
 ### Quick API test
 
 ```bash
