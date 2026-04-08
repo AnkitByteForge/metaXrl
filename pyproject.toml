@@ -21,7 +21,7 @@ server = "server.app:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["soc_env*", "scenarios*"]
+include = ["soc_env*", "scenarios*", "server*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

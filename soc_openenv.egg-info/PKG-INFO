@@ -3,6 +3,7 @@ Name: soc-openenv
 Version: 1.0.0
 Summary: SOC Incident Response OpenEnv environment
 Requires-Python: >=3.10
+Requires-Dist: openenv>=0.2.0
 Requires-Dist: fastapi>=0.115
 Requires-Dist: uvicorn[standard]>=0.30
 Requires-Dist: pydantic>=2.7

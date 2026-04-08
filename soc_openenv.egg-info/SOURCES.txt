@@ -4,6 +4,8 @@ scenarios/__init__.py
 scenarios/easy_scenarios.py
 scenarios/hard_scenarios.py
 scenarios/medium_scenarios.py
+server/__init__.py
+server/app.py
 soc_env/__init__.py
 soc_env/environment.py
 soc_env/graders.py
@@ -11,6 +13,7 @@ soc_env/models.py
 soc_openenv.egg-info/PKG-INFO
 soc_openenv.egg-info/SOURCES.txt
 soc_openenv.egg-info/dependency_links.txt
+soc_openenv.egg-info/entry_points.txt
 soc_openenv.egg-info/requires.txt
 soc_openenv.egg-info/top_level.txt
 tests/test_environment.py
