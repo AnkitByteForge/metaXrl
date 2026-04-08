@@ -22,6 +22,7 @@ import os
 import re
 import sys
 import textwrap
+import openenv
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI

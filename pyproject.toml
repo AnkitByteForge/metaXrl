@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "SOC Incident Response OpenEnv environment"
 requires-python = ">=3.10"
 dependencies = [
-    "openenv-core>=0.2.0",
+    "openenv>=0.2.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "pydantic>=2.7",
