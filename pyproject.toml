@@ -8,12 +8,16 @@ version = "1.0.0"
 description = "SOC Incident Response OpenEnv environment"
 requires-python = ">=3.10"
 dependencies = [
+    "openenv-core>=0.2.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "pydantic>=2.7",
     "openai>=1.40",
     "httpx>=0.27",
 ]
+
+[project.scripts]
+server = "server.app:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
