@@ -16,6 +16,21 @@ fail() { echo -e "${RED}FAIL${NC} $1"; FAIL=$((FAIL+1)); }
 warn() { echo -e "${YELLOW}WARN${NC} $1"; }
 hdr()  { echo -e "\n${BOLD}── $1 ──${NC}"; }
 
+# Python interpreter selection (override with PYTHON_BIN env var)
+if [ -z "${PYTHON_BIN:-}" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  elif [ -x "/mnt/c/Users/jayan/OneDrive/Documents/Projects/metaXrl/metaXrl/.venv/Scripts/python.exe" ]; then
+    PYTHON_BIN="/mnt/c/Users/jayan/OneDrive/Documents/Projects/metaXrl/metaXrl/.venv/Scripts/python.exe"
+  else
+    fail "No Python interpreter found. Set PYTHON_BIN to your project Python."
+    echo -e "${BOLD}========================================${NC}"
+    exit 1
+  fi
+fi
+
 echo -e "${BOLD}========================================${NC}"
 echo -e "${BOLD}  SOC OpenEnv — Pre-submission Validator${NC}"
 echo -e "${BOLD}========================================${NC}"
@@ -41,12 +56,12 @@ grep -q "POST /reset" openenv.yaml && pass "reset endpoint" || fail "reset endpo
 hdr "3. Python syntax"
 for f in server.py inference.py soc_env/models.py soc_env/environment.py soc_env/graders.py \
          scenarios/easy_scenarios.py scenarios/medium_scenarios.py scenarios/hard_scenarios.py; do
-  python3 -m py_compile "$f" 2>/dev/null && pass "syntax OK: $f" || fail "syntax error: $f"
+  "$PYTHON_BIN" -m py_compile "$f" 2>/dev/null && pass "syntax OK: $f" || fail "syntax error: $f"
 done
 
 # 4. Environment contract
 hdr "4. Environment contract (reset/step/state/grade)"
-python3 - <<'PYEOF'
+"$PYTHON_BIN" - <<'PYEOF'
 import sys; sys.path.insert(0, '.')
 from soc_env import SOCEnv, Action
 from soc_env.models import ActionType, Observation, Reward, EnvState
@@ -79,7 +94,7 @@ PYEOF
 
 # 5. Grader determinism
 hdr "5. Grader determinism"
-python3 - <<'PYEOF'
+"$PYTHON_BIN" - <<'PYEOF'
 import sys; sys.path.insert(0, '.')
 from soc_env import SOCEnv, Action
 from soc_env.models import ActionType
@@ -106,7 +121,7 @@ PYEOF
 
 # 6. Scores vary
 hdr "6. Scores vary across agents"
-python3 - <<'PYEOF'
+"$PYTHON_BIN" - <<'PYEOF'
 import sys; sys.path.insert(0, '.')
 from soc_env import SOCEnv, Action
 from soc_env.models import ActionType
@@ -144,13 +159,27 @@ grep -q "7860"        Dockerfile && pass "Port 7860"  || fail "Port 7860 not exp
 grep -q "HEALTHCHECK" Dockerfile && pass "HEALTHCHECK" || warn "No HEALTHCHECK"
 grep -q "^CMD"        Dockerfile && pass "CMD present" || fail "No CMD"
 if command -v docker &>/dev/null; then
-  echo "  Building Docker image (may take 1-2 min)..."
-  docker build -t soc-openenv-validate . -q 2>/dev/null \
-    && pass "docker build succeeded" \
-    && docker rmi soc-openenv-validate -f &>/dev/null \
-    || fail "docker build FAILED — run 'docker build .' for details"
+  if docker info >/dev/null 2>&1; then
+    echo "  Building Docker image (may take 1-2 min)..."
+    docker build -t soc-openenv-validate . -q 2>/dev/null \
+      && pass "docker build succeeded" \
+      && docker rmi soc-openenv-validate -f &>/dev/null \
+      || fail "docker build FAILED — run 'docker build .' for details"
+  else
+    warn "Docker CLI found but daemon unavailable in this shell — skipping build check."
+  fi
+elif command -v docker.exe &>/dev/null; then
+  if docker.exe info >/dev/null 2>&1; then
+    echo "  Building Docker image via docker.exe (may take 1-2 min)..."
+    docker.exe build -t soc-openenv-validate . -q 2>/dev/null \
+      && pass "docker build succeeded" \
+      && docker.exe rmi soc-openenv-validate -f &>/dev/null \
+      || fail "docker build FAILED — run 'docker build .' for details"
+  else
+    warn "docker.exe found but daemon unavailable — skipping build check."
+  fi
 else
-  warn "Docker not installed — skipping build. Install before final submission."
+  warn "Docker not installed/available in this shell — skipping build check."
 fi
 
 # 9. HF Space (optional)
