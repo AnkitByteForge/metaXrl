@@ -1,0 +1,20 @@
+[
+  {
+    "task_id": "alert_triage",
+    "steps_taken": 10,
+    "cumulative_reward": 0.35,
+    "final_score": 0.0,
+    "step_log": [
+      "step=1 action=enrich_alert reward=+0.035 info=enrichment",
+      "step=2 action=enrich_alert reward=+0.035 info=enrichment",
+      "step=3 action=enrich_alert reward=+0.035 info=enrichment",
+      "step=4 action=enrich_alert reward=+0.035 info=enrichment",
+      "step=5 action=enrich_alert reward=+0.035 info=enrichment",
+      "step=6 action=enrich_alert reward=+0.035 info=enrichment",
+      "step=7 action=enrich_alert reward=+0.035 info=enrichment",
+      "step=8 action=enrich_alert reward=+0.035 info=enrichment",
+      "step=9 action=enrich_alert reward=+0.035 info=enrichment",
+      "step=10 action=enrich_alert reward=+0.035 info=enrichment"
+    ]
+  }
+]
