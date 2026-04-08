@@ -13,6 +13,11 @@ function AboutPage() {
             It combines deterministic grading, reproducible tasks, and operational constraints so teams can
             benchmark model quality and response behavior with confidence.
           </p>
+          <p>
+            Reward behavior: positive reward is given for useful investigative and containment actions, negative
+            reward is applied for false-positive containment and invalid actions, and neutral reward appears when
+            actions produce little net effect. Each step score is clipped between -1.0 and 1.0.
+          </p>
         </article>
 
         <article className="about-card reveal" style={{ animationDelay: "0.14s" }}>
