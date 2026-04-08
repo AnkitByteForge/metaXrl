@@ -9,7 +9,8 @@ endpoint, so the model call stays standard while the credentials come from HF.
 Environment variables:
     API_BASE_URL  — Hugging Face / OpenAI-compatible LLM endpoint
     MODEL_NAME    — model identifier
-    HF_TOKEN      — Hugging Face access token
+    HF_TOKEN      — Hugging Face access token (no default)
+    LOCAL_IMAGE_NAME — optional, for docker-image based flows
 
 Usage:
     python inference.py                    # runs all 3 tasks
@@ -31,9 +32,10 @@ from soc_env.models import ActionType
 # ---------------------------------------------------------------------------
 # Config — read from environment variables (mandatory per spec)
 # ---------------------------------------------------------------------------
-API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://api.sambanova.ai/v1")
-API_KEY: str      = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY", "placeholder")
-MODEL_NAME: str   = os.environ.get("MODEL_NAME", "DeepSeek-V3.2")
+API_BASE_URL: str = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME: str   = os.getenv("MODEL_NAME", "meta-llama/Llama-3.3-70B-Instruct")
+HF_TOKEN: Optional[str] = os.getenv("HF_TOKEN")
+LOCAL_IMAGE_NAME: Optional[str] = os.getenv("LOCAL_IMAGE_NAME")
 
 TEMPERATURE: float = 0.1
 MAX_TOKENS: int    = 512
@@ -157,9 +159,7 @@ def parse_action(response_text: str, obs: dict) -> Action:
 # ---------------------------------------------------------------------------
 
 def run_task(client: OpenAI, task_id: str) -> Dict[str, Any]:
-    print(f"\n{'='*60}")
-    print(f"  Task: {task_id}")
-    print(f"{'='*60}")
+    print(f"START task={task_id} seed={SEED} model={MODEL_NAME}")
 
     env = SOCEnv(task_id=task_id, seed=SEED)
     obs = env.reset()
@@ -170,6 +170,8 @@ def run_task(client: OpenAI, task_id: str) -> Dict[str, Any]:
 
     for step_num in range(1, SOCEnv.MAX_STEPS[task_id] + 1):
         user_prompt = observation_to_prompt(obs_dict, step_num)
+        llm_error: Optional[str] = None
+        used_fallback = False
         try:
             completion = client.chat.completions.create(
                 model=MODEL_NAME,
@@ -182,29 +184,47 @@ def run_task(client: OpenAI, task_id: str) -> Dict[str, Any]:
             )
             response_text = completion.choices[0].message.content or ""
         except Exception as exc:
-            print(f"  [Step {step_num}] LLM error: {exc} — using fallback")
+            llm_error = str(exc)
+            used_fallback = True
             response_text = ""
 
         action = parse_action(response_text, obs_dict)
         payload = {k: v for k, v in action.model_dump().items() if v is not None and k != "action_type"}
-        print(f"  [Step {step_num:02d}] {action.action_type.value:<24} {payload}")
 
         try:
             obs, reward, done, info = env.step(action)
             obs_dict = obs.model_dump()
         except Exception as exc:
-            print(f"  [Step {step_num}] Env error: {exc}")
+            llm_error = str(exc)
+            used_fallback = True
             break
 
         total_reward += reward.total
         step_log.append(f"step={step_num} action={action.action_type.value} reward={reward.total:+.3f} info={reward.info}")
-        print(f"             reward={reward.total:+.3f} cumulative={total_reward:+.3f} done={done}")
+        print(
+            "STEP "
+            f"task={task_id} "
+            f"step={step_num} "
+            f"action={action.action_type.value} "
+            f"payload={json.dumps(payload, separators=(',', ':'))} "
+            f"reward={reward.total:+.3f} "
+            f"cumulative={total_reward:+.3f} "
+            f"fallback={str(used_fallback).lower()} "
+            f"llm_error={json.dumps(llm_error) if llm_error is not None else 'null'} "
+            f"done={str(done).lower()}"
+        )
 
         if done:
             break
 
     score = env.grade()
-    print(f"\n  Final score [{task_id}]: {score:.4f}")
+    print(
+        "END "
+        f"task={task_id} "
+        f"steps={step_num} "
+        f"cumulative_reward={total_reward:+.4f} "
+        f"score={score:.4f}"
+    )
     return {
         "task_id": task_id,
         "steps_taken": step_num,
@@ -224,25 +244,22 @@ def main():
     parser.add_argument("--seed", type=int, default=SEED)
     args = parser.parse_args()
 
-    if API_KEY == "placeholder":
-        print("WARNING: HF_TOKEN / API_KEY not set. Set environment variables before running.")
+    if not HF_TOKEN:
+        print("ERROR: HF_TOKEN is required and must be set in the environment.")
+        sys.exit(1)
 
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
     tasks  = SOCEnv.TASK_IDS if args.task == "all" else [args.task]
     results = []
 
     for task_id in tasks:
         results.append(run_task(client, task_id))
 
-    print(f"\n{'='*60}")
-    print("  BASELINE RESULTS")
-    print(f"{'='*60}")
     for r in results:
-        print(f"  {r['task_id']:<42} score={r['final_score']:.4f}  reward={r['cumulative_reward']:+.4f}")
+        print(f"END task={r['task_id']} summary=true score={r['final_score']:.4f} reward={r['cumulative_reward']:+.4f}")
 
     with open("baseline_results.json", "w") as f:
         json.dump(results, f, indent=2)
-    print("\n  Saved to baseline_results.json")
 
     all_ok = all(isinstance(r["final_score"], float) and 0.0 <= r["final_score"] <= 1.0 for r in results)
     sys.exit(0 if all_ok else 1)
