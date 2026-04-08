@@ -33,6 +33,29 @@ app = FastAPI(
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 _envs: Dict[str, SOCEnv] = {}
+TASK_METADATA = [
+    {
+        "id": "alert_triage",
+        "difficulty": "easy",
+        "max_steps": 10,
+        "name": "Alert triage",
+        "description": "Classify noisy SIEM alerts, enrich the useful ones, and contain the true positives.",
+    },
+    {
+        "id": "attack_chain_reconstruction",
+        "difficulty": "medium",
+        "max_steps": 25,
+        "name": "Attack chain reconstruction",
+        "description": "Correlate alerts across hosts, identify the ATT&CK chain, and stop lateral movement.",
+    },
+    {
+        "id": "constrained_incident_response",
+        "difficulty": "hard",
+        "max_steps": 40,
+        "name": "Constrained incident response",
+        "description": "Respond to an active breach while respecting legal hold, customer-facing, and hard-block constraints.",
+    },
+]
 
 
 def _get_env(task_id: str) -> SOCEnv:
@@ -64,11 +87,7 @@ def root():
 
 @app.get("/api/tasks")
 def list_tasks():
-    return {"tasks": [
-        {"id": "alert_triage",                   "difficulty": "easy",   "max_steps": 10},
-        {"id": "attack_chain_reconstruction",     "difficulty": "medium", "max_steps": 25},
-        {"id": "constrained_incident_response",   "difficulty": "hard",   "max_steps": 40},
-    ]}
+    return {"tasks": TASK_METADATA}
 
 
 @app.post("/reset")

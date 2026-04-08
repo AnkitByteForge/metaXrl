@@ -3,33 +3,59 @@ function AboutPage() {
     <section className="page page-about">
       <div className="about-grid">
         <article className="about-card reveal">
-          <p className="section-label">About The Project</p>
-          <h2>SOC OpenEnv</h2>
+          <p className="section-label">What this is</p>
+          <h2>SOC Incident Response OpenEnv</h2>
           <p>
-            SOC OpenEnv is a simulation-driven security operations environment where AI agents practice
-            triage, investigation, and containment workflows in realistic incident scenarios.
+            This project models a real security operations workflow: an analyst receives SIEM alerts, inspects
+            hosts and constraints, applies containment actions, and closes the episode with a graded outcome.
           </p>
           <p>
-            It combines deterministic grading, reproducible tasks, and operational constraints so teams can
-            benchmark model quality and response behavior with confidence.
-          </p>
-          <p>
-            Reward behavior: positive reward is given for useful investigative and containment actions, negative
-            reward is applied for false-positive containment and invalid actions, and neutral reward appears when
-            actions produce little net effect. Each step score is clipped between -1.0 and 1.0.
+            The environment is the simulator. The model is the decision policy. The grader is the benchmark.
+            That separation is what makes the repository usable for OpenEnv evaluation, HF Space deployment, and
+            reproducible baseline runs.
           </p>
         </article>
 
-        <article className="about-card reveal" style={{ animationDelay: "0.14s" }}>
-          <p className="section-label">About The Users</p>
-          <h2>Who Uses It</h2>
+        <article className="about-card reveal" style={{ animationDelay: "0.08s" }}>
+          <p className="section-label">What the agent sees</p>
+          <h2>Structured observations and typed actions</h2>
           <p>
-            Security researchers use it to evaluate autonomous defenders, SOC engineers use it to test playbook
-            logic, and AI teams use it to compare model safety and containment decisions.
+            Each step exposes alerts, hosts, business constraints, recent notes, and timing data. The agent can
+            submit one JSON action per turn, such as enriching alerts, correlating incidents, isolating endpoints,
+            collecting forensics, escalating, or creating a ticket.
           </p>
           <p>
-            It is also useful for learners building practical intuition around alert quality, false positive
-            handling, and attack-chain context across enterprise systems.
+            The backend enforces the rules. For example, hard-block constraints prevent unsafe isolation, and the
+            observation returned to the agent never includes hidden ground-truth fields.
+          </p>
+        </article>
+
+        <article className="about-card reveal" style={{ animationDelay: "0.16s" }}>
+          <p className="section-label">How scoring works</p>
+          <h2>Dense rewards plus deterministic graders</h2>
+          <p>
+            Step rewards give partial credit for useful actions and penalties for wasteful or unsafe ones. At the
+            end of the episode, deterministic graders score the final state in the 0.0–1.0 range for easy,
+            medium, and hard tasks.
+          </p>
+          <p>
+            This gives the environment both learning signal and evaluation signal, which is exactly what the
+            hackathon rubric asks for.
+          </p>
+        </article>
+
+        <article className="about-card reveal" style={{ animationDelay: "0.24s" }}>
+          <p className="section-label">How to demo it</p>
+          <h2>Backend, frontend, and baseline</h2>
+          <p>
+            The FastAPI backend exposes /reset, /step, /state, /grade, and /api/tasks. The React frontend is a
+            judge-facing console that visualizes the live episode. The inference script uses the OpenAI client
+            against a Hugging Face-compatible endpoint, reading API_BASE_URL, MODEL_NAME, and HF_TOKEN from the
+            environment.
+          </p>
+          <p>
+            That setup keeps secrets out of the browser and makes the baseline reproducible across local runs,
+            Docker, and HF Spaces.
           </p>
         </article>
       </div>

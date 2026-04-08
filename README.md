@@ -9,155 +9,220 @@ pinned: false
 license: mit
 ---
 
-# SOC Incident Response — OpenEnv
+# SOC Incident Response OpenEnv
 
-A real-world Security Operations Center environment where an AI agent acts as a Tier-1 SOC analyst. The agent triages SIEM alerts, reconstructs MITRE ATT&CK kill chains, isolates compromised hosts, and navigates genuine business constraints during active incidents.
+## Problem Statement
 
-**Industry:** $200B+ cybersecurity market. CrowdStrike, Palo Alto, Microsoft all building autonomous SOC agents.
-**Why it matters:** SOC analysts face 1,000+ alerts/day. Mean time to containment is 280 days. This environment trains agents for exactly that workflow.
+Security Operations Center teams handle large alert volumes, multi-stage attacks, and conflicting business constraints during active incidents. This project turns that real workflow into a trainable and testable OpenEnv benchmark.
 
----
+The goal is to evaluate how well an agent can:
+
+- triage noisy SIEM alerts
+- reconstruct attack chains across hosts
+- contain threats without violating critical business constraints
+
+This environment is designed for hackathon-style validation and reproducible benchmarking.
+
+## What This Project Implements
+
+- Real-world SOC simulation (not a toy domain)
+- Full OpenEnv interface with typed models
+- `reset()`, `step()`, `state()` contract
+- Three tasks with difficulty progression
+- Deterministic graders returning scores in `[0.0, 1.0]`
+- Dense reward shaping with partial progress signals
+- Baseline inference script using OpenAI client against an OpenAI-compatible endpoint
+- FastAPI backend and React frontend console for local and judge demos
+- Docker + Hugging Face Spaces compatible packaging
+
+## Core Workflow (Conceptual)
+
+This project has three separate layers:
+
+1. Environment
+   The simulator generates observations, applies actions, tracks state, and emits rewards.
+
+2. Policy Model
+   The baseline model reads observations and outputs one JSON action per step.
+
+3. Grader
+   At episode end, deterministic graders map final state to a score from `0.0` to `1.0`.
+
+In short: `observation -> action -> step -> reward -> final grade`.
 
 ## Tasks
 
-| ID | Difficulty | Max Steps | Description |
-|---|---|---|---|
-| `alert_triage` | Easy | 10 | 5 alerts (3 TP, 2 FP) — classify and contain |
-| `attack_chain_reconstruction` | Medium | 25 | 15 alerts, 4 hosts, 9-stage ATT&CK kill chain |
-| `constrained_incident_response` | Hard | 40 | Active breach, CEO laptop, customer API, legal hold |
+| ID | Difficulty | Max Steps | Objective |
+|---|---|---:|---|
+| `alert_triage` | Easy | 10 | Classify and contain true positives while avoiding false-positive containment |
+| `attack_chain_reconstruction` | Medium | 25 | Correlate alerts across hosts, recover ATT&CK chain context, contain correctly |
+| `constrained_incident_response` | Hard | 40 | Balance security, continuity, and compliance under hard business constraints |
 
----
+## API Endpoints
 
-## Observation Space
+- `POST /reset`
+- `POST /step`
+- `GET /state`
+- `POST /grade`
+- `GET /api/tasks`
 
-```
-Observation
-├── step, task_id, task_description
-├── active_alerts: List[SIEMAlert]
-│   ├── alert_id, timestamp, severity, rule_name, description
-│   ├── host_id, user_id, mitre_tactic, mitre_technique
-│   ├── indicators: [{type, value, reputation}]
-│   ├── raw_log, status, enrichment (after enrich_alert)
-│   └── [ground_truth hidden from agent]
-├── hosts: List[NetworkHost]
-│   └── host_id, hostname, ip, role, status, is_critical, is_vip
-├── business_constraints: List[BusinessConstraint]
-│   └── host_id/user_id, constraint_type, severity (advisory|hard_block), reason
-├── notes: List[InvestigationNote]   (agent's action history)
-├── elapsed_minutes, steps_remaining
-└── last_action_result, last_action_success
-```
+## Local Setup
 
----
-
-## Action Space
-
-| action_type | Required fields | Effect |
-|---|---|---|
-| `enrich_alert` | `alert_id`, `source` ("threat_intel"\|"user_context"\|"asset_db") | Reveals indicator reputations and context |
-| `correlate_alerts` | `alert_ids` (list), `correlation_hypothesis` | Links alerts, identifies MITRE tactics |
-| `isolate_endpoint` | `host_id` | Cuts host from network (blocked by hard_block constraints) |
-| `disable_account` | `user_id` | Revokes credentials, kills sessions |
-| `collect_forensics` | `host_id`, `artifact_types` | Collects evidence; applies legal hold if required |
-| `escalate_to_tier2` | `summary` | Hands off to senior analyst |
-| `create_ticket` | `priority`, `summary` | Creates incident record |
-
----
-
-## Reward Function
-
-| Event | Reward |
-|---|---|
-| Enrich alert | +0.05 |
-| New ATT&CK stage identified | +0.08 per stage |
-| Correct host isolation (in chain) | +0.25 |
-| Correct account disable | +0.10 |
-| Collect forensics | +0.05 |
-| Appropriate escalation | +0.10 |
-| Create ticket | +0.05 |
-| False positive isolation | −0.20 |
-| Per-step dwell time | −0.015 to −0.030 |
-| Invalid action | −0.02 |
-
-Rewards clipped to [−1.0, 1.0] per step.
-
----
-
-## Grader Logic
-
-**Easy** — `score = 0.6 × classification_accuracy + 0.4 × containment_score − fp_penalty`
-
-**Medium** — `score = 0.5 × chain_coverage + 0.3 × containment + −0.1 × dwell − 0.1 × fp_isolations`
-
-**Hard** — `score = 0.40 × security + 0.35 × business_continuity + 0.25 × compliance`
-
-All graders are 100% deterministic. Same state → same score, always.
-
----
-
-## Setup & Usage
-
-### Install locally
+### 1) Python dependencies
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/soc-openenv
-cd soc-openenv
 pip install -r requirements.txt
 pip install -e . --no-deps
 ```
 
-### Run the server
-
-```bash
-python server.py
-# API docs at http://localhost:7860/docs
-```
-
-### Run the web UI (React + TypeScript)
+### 2) Frontend dependencies
 
 ```bash
 cd web
 npm install
+cd ..
+```
+
+## Run Locally (Recommended Terminal Layout)
+
+Use two terminals.
+
+### Terminal A: backend
+
+```powershell
+python server.py
+```
+
+Backend should be live at:
+
+- `http://127.0.0.1:7860/docs`
+
+### Terminal B: frontend
+
+```powershell
+cd web
+$env:VITE_API_BASE_URL="http://127.0.0.1:7860"
 npm run dev
-# UI at http://localhost:5173
 ```
 
-### Quick API test
+Frontend should be live at:
 
-```bash
-# Reset
-curl -X POST http://localhost:7860/reset \
-  -H "Content-Type: application/json" \
-  -d '{"task_id": "alert_triage", "seed": 42}'
+- `http://localhost:5173`
 
-# Step
-curl -X POST http://localhost:7860/step \
-  -H "Content-Type: application/json" \
-  -d '{"task_id":"alert_triage","action":{"action_type":"enrich_alert","alert_id":"ALT-001","source":"threat_intel"}}'
+## How To Test Locally (Backend-Only)
 
-# Grade
-curl -X POST "http://localhost:7860/grade?task_id=alert_triage"
+This is the fastest way to validate API behavior before UI checks.
+
+### Step 1: reset
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7860/reset" -ContentType "application/json" -Body '{"task_id":"alert_triage","seed":42}'
 ```
 
-### Run baseline inference
+### Step 2: step
 
-```bash
-export API_BASE_URL="https://router.huggingface.co/v1"
-export MODEL_NAME="meta-llama/Llama-3.3-70B-Instruct"
-export HF_TOKEN="hf_your_token_here"
-
-python inference.py          # all 3 tasks
-python inference.py --task alert_triage   # single task
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7860/step" -ContentType "application/json" -Body '{"task_id":"alert_triage","action":{"action_type":"enrich_alert","alert_id":"ALT-001","source":"threat_intel"}}'
 ```
 
-### Run tests
+### Step 3: state
 
-```bash
-pip install pytest
-pytest tests/ -v
+```powershell
+Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:7860/state?task_id=alert_triage"
 ```
 
-### Docker
+### Step 4: grade
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7860/grade?task_id=alert_triage"
+```
+
+Important: Always call `reset` first for a task before calling `step` or `grade`.
+
+## How To Test Locally (Frontend Console)
+
+After backend + frontend are running:
+
+1. Open `http://localhost:5173`
+2. Select a task on the left panel
+3. Click `Reset episode`
+4. Confirm `Current observation` and `Backend state` are populated
+5. Click `Load suggested action` or edit JSON manually
+6. Click `Execute draft action`
+7. Optionally click `Run guided demo`
+8. Click `Grade current episode`
+
+You should see trace events, reward updates, and a final score breakdown.
+
+## Baseline Inference Script
+
+`inference.py` runs all three tasks by default and writes `baseline_results.json`.
+
+Required environment variables:
+
+- `API_BASE_URL`
+- `MODEL_NAME`
+- `HF_TOKEN`
+
+Example (PowerShell):
+
+```powershell
+$env:API_BASE_URL="https://router.huggingface.co/v1"
+$env:MODEL_NAME="meta-llama/Llama-3.3-70B-Instruct"
+$env:HF_TOKEN="hf_your_token_here"
+python inference.py
+```
+
+Single task:
+
+```powershell
+python inference.py --task alert_triage
+```
+
+## Expected Output Artifacts
+
+- Console logs per step with action and reward
+- Final scores per task
+- `baseline_results.json` in repo root
+
+## Common Errors and Fixes
+
+### 400 on `/step` in UI
+
+Cause:
+- Episode not reset for the selected task.
+
+Fix:
+- Click `Reset episode` first, then run step.
+
+### 401 Invalid username or password in `inference.py`
+
+Cause:
+- Invalid or missing token/model access.
+
+Fix:
+- Verify `HF_TOKEN` is set in the same terminal session.
+- Verify token has access to chosen model.
+- Verify endpoint and model name are valid.
+
+### Frontend cannot reach backend
+
+Cause:
+- Wrong API base URL.
+
+Fix:
+- Start backend on `127.0.0.1:7860`.
+- Start frontend with `VITE_API_BASE_URL=http://127.0.0.1:7860`.
+
+## Tests
+
+Run unit tests:
+
+```powershell
+pytest tests -q
+```
+
+## Docker
 
 ```bash
 docker build -t soc-openenv .
@@ -168,79 +233,38 @@ docker run -p 7860:7860 \
   soc-openenv
 ```
 
-### Validate before submitting
+## Validation Before Submission
 
 ```bash
-chmod +x validate.sh
-./validate.sh                                      # local checks
-./validate.sh https://YOUR_USERNAME-soc-openenv.hf.space  # + HF ping
+./validate.sh
+./validate.sh https://YOUR_USERNAME-soc-openenv.hf.space
 ```
 
-### Deploy to Hugging Face Spaces
+## Hugging Face Spaces
 
-```bash
-pip install huggingface_hub
-huggingface-cli login
-openenv push --repo-id YOUR_USERNAME/soc-openenv
-```
+Set these Space secrets:
 
----
-
-## Baseline Scores
-
-Run `python inference.py` after setting your API keys to generate actual numbers. Replace the placeholders below:
-
-| Task | Difficulty | Score | Notes |
-|---|---|---|---|
-| alert_triage | Easy | TBD | Run inference.py |
-| attack_chain_reconstruction | Medium | TBD | Run inference.py |
-| constrained_incident_response | Hard | TBD | Run inference.py |
-
-Scores are reproducible with `seed=42`. Results saved to `baseline_results.json`.
-
----
+- `API_BASE_URL`
+- `MODEL_NAME`
+- `HF_TOKEN`
 
 ## Project Structure
 
-```
+```text
 soc-openenv/
-├── openenv.yaml              OpenEnv spec (name, tasks, endpoints)
-├── Dockerfile                Container — port 7860, healthcheck
-├── requirements.txt          Pinned Python dependencies
-├── pyproject.toml            Package config
-├── README.md                 This file
-├── inference.py              Baseline script (MANDATORY — root level)
-├── server.py                 FastAPI: /reset /step /state /grade /tasks
-├── validate.sh               Pre-submission validator
-│
-├── soc_env/                  Core package
-│   ├── __init__.py
-│   ├── models.py             Pydantic models: Observation, Action, Reward, EnvState
-│   ├── environment.py        SOCEnv: reset() step() state() grade()
-│   └── graders.py            3 deterministic graders → float [0.0, 1.0]
-│
-├── scenarios/                Synthetic scenario data
-│   ├── __init__.py           load_scenario() dispatcher
-│   ├── easy_scenarios.py     5 alerts, clear TP/FP
-│   ├── medium_scenarios.py   15 alerts, 9-stage ATT&CK chain
-│   └── hard_scenarios.py     Active breach + business constraints
-│
-└── tests/
-    ├── conftest.py
-    ├── test_environment.py   reset/step/state contract, hard-block enforcement
-    └── test_graders.py       bounds, determinism, scoring logic
+├── openenv.yaml
+├── Dockerfile
+├── requirements.txt
+├── pyproject.toml
+├── README.md
+├── inference.py
+├── server.py
+├── validate.sh
+├── soc_env/
+├── scenarios/
+├── tests/
+└── web/
 ```
-
----
-
-## MITRE ATT&CK Coverage
-
-The medium and hard scenarios cover the following tactics:
-Initial Access → Execution → Persistence → Defense Evasion → Credential Access → Discovery → Lateral Movement → Collection → Exfiltration → Impact
-
-Technique IDs follow ATT&CK Enterprise v14.
-
----
 
 ## Contact
 
