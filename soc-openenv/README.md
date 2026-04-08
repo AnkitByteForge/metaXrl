@@ -1,3 +1,14 @@
+---
+title: MetaXRL Soc-OpenEnv
+emoji: 🐳
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+---
+
 # SOC Incident Response — OpenEnv
 
 A real-world Security Operations Center environment where an AI agent acts as a Tier-1 SOC analyst. The agent triages SIEM alerts, reconstructs MITRE ATT&CK kill chains, isolates compromised hosts, and navigates genuine business constraints during active incidents.
