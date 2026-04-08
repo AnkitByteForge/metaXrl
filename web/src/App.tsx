@@ -14,11 +14,11 @@ function App() {
         <nav className="nav-links" aria-label="Main navigation">
           <NavLink to="/" className={({ isActive }) => (isActive ? "active" : "")}
           >
-            Home
+            Console
           </NavLink>
           <NavLink to="/about" className={({ isActive }) => (isActive ? "active" : "")}
           >
-            About
+            Guide
           </NavLink>
         </nav>
       </header>

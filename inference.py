@@ -3,14 +3,17 @@ inference.py — Baseline inference script for SOC Incident Response OpenEnv.
 
 MANDATORY: must be named inference.py and live in the repo root.
 
+The script uses the OpenAI client against an OpenAI-compatible Hugging Face
+endpoint, so the model call stays standard while the credentials come from HF.
+
 Environment variables:
-  API_BASE_URL  — LLM API endpoint
-  MODEL_NAME    — model identifier
-  HF_TOKEN      — Hugging Face / API key
+    API_BASE_URL  — Hugging Face / OpenAI-compatible LLM endpoint
+    MODEL_NAME    — model identifier
+    HF_TOKEN      — Hugging Face access token
 
 Usage:
-  python inference.py                    # runs all 3 tasks
-  python inference.py --task alert_triage
+    python inference.py                    # runs all 3 tasks
+    python inference.py --task alert_triage
 """
 import argparse
 import json
@@ -28,9 +31,9 @@ from soc_env.models import ActionType
 # ---------------------------------------------------------------------------
 # Config — read from environment variables (mandatory per spec)
 # ---------------------------------------------------------------------------
-API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
+API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://api.sambanova.ai/v1")
 API_KEY: str      = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY", "placeholder")
-MODEL_NAME: str   = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.3-70B-Instruct")
+MODEL_NAME: str   = os.environ.get("MODEL_NAME", "DeepSeek-V3.2")
 
 TEMPERATURE: float = 0.1
 MAX_TOKENS: int    = 512

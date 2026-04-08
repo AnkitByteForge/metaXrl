@@ -1,452 +1,810 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-type Action = {
-  taskId: "alert_triage" | "attack_chain_reconstruction" | "constrained_incident_response";
-  difficulty: "easy" | "medium" | "hard";
-  title: string;
+type TaskId = "alert_triage" | "attack_chain_reconstruction" | "constrained_incident_response";
+type Difficulty = "easy" | "medium" | "hard";
+
+type TaskDefinition = {
+  id: TaskId;
+  name: string;
+  difficulty: Difficulty;
+  max_steps: number;
   description: string;
-  endpoint: string;
 };
 
-type ResetResponse = {
-  active_alerts?: Array<{ alert_id?: string }>;
+type AlertRecord = {
+  alert_id?: string;
+  severity?: string;
+  host_id?: string;
+  user_id?: string | null;
+  rule_name?: string;
+  mitre_tactic?: string | null;
+  status?: string;
+  enrichment?: unknown;
+  indicators?: Array<{
+    type?: string;
+    value?: string;
+    reputation?: string;
+  }>;
+};
+
+type HostRecord = {
+  host_id?: string;
+  hostname?: string;
+  status?: string;
+  role?: string;
+  is_critical?: boolean;
+  is_vip?: boolean;
+};
+
+type ConstraintRecord = {
+  host_id?: string | null;
+  user_id?: string | null;
+  constraint_type?: string;
+  severity?: string;
+  reason?: string;
+};
+
+type NoteRecord = {
+  step?: number;
+  action_taken?: string;
+  finding?: string;
+  timestamp?: string;
+};
+
+type Observation = {
+  step: number;
+  task_id: string;
+  task_description: string;
+  active_alerts: AlertRecord[];
+  acknowledged_alerts?: AlertRecord[];
+  hosts: HostRecord[];
+  business_constraints: ConstraintRecord[];
+  notes: NoteRecord[];
+  elapsed_minutes: number;
+  steps_remaining: number;
+  last_action_result?: string | null;
+  last_action_success?: boolean;
+};
+
+type EnvState = {
+  task_id: string;
+  step: number;
+  done: boolean;
+  cumulative_reward: number;
+  observation: Observation;
+  attack_chain?: Record<string, unknown> | null;
+  identified_stages?: string[];
+  isolated_hosts?: string[];
+  disabled_accounts?: string[];
+  forensics_collected?: Record<string, string[]>;
+  escalated?: boolean;
+  ticket_created?: boolean;
+};
+
+type StepReward = {
+  total?: number;
+  classification_delta?: number;
+  chain_coverage_delta?: number;
+  containment_delta?: number;
+  dwell_penalty?: number;
+  fp_penalty?: number;
+  compliance_delta?: number;
+  info?: string;
 };
 
 type StepResponse = {
-  reward?: { total?: number };
+  observation?: Observation;
+  reward?: StepReward;
   done?: boolean;
+  info?: Record<string, unknown>;
 };
 
 type GradeResponse = {
+  task_id?: string;
   score?: number;
+  breakdown?: Record<string, unknown>;
 };
 
-type RunRecord = {
+type RunTrace = {
   id: string;
+  kind: "reset" | "step" | "grade" | "error" | "info";
   title: string;
-  taskId: Action["taskId"];
-  difficulty: Action["difficulty"];
-  reward: number;
-  gradeScore: number | null;
-  done: boolean;
-  success: boolean;
-  message: string;
+  detail: string;
+  reward?: number;
+  done?: boolean;
+  actionType?: string;
   createdAt: string;
 };
 
-const actions: Action[] = [
+type TaskSeed = {
+  action_type: string;
+  alert_id?: string;
+  alert_ids?: string[];
+  host_id?: string;
+  user_id?: string;
+  artifact_types?: string[];
+  source?: string;
+  priority?: "P1" | "P2" | "P3";
+  summary?: string;
+  correlation_hypothesis?: string;
+};
+
+const FALLBACK_TASKS: TaskDefinition[] = [
   {
-    taskId: "alert_triage",
+    id: "alert_triage",
+    name: "Alert triage",
     difficulty: "easy",
-    title: "Alert Triage",
-    description: "Review mixed true/false positive alerts and contain the verified threats.",
-    endpoint: "POST /reset + /step (task: alert_triage)"
+    max_steps: 10,
+    description: "Classify noisy SIEM alerts, enrich the useful ones, and contain the true positives."
   },
   {
-    taskId: "attack_chain_reconstruction",
+    id: "attack_chain_reconstruction",
+    name: "Attack chain reconstruction",
     difficulty: "medium",
-    title: "Attack Chain Reconstruction",
-    description: "Correlate multi-host signals and map attacker behavior across ATT&CK stages.",
-    endpoint: "POST /step (task: attack_chain_reconstruction)"
+    max_steps: 25,
+    description: "Correlate alerts across hosts, identify the ATT&CK chain, and stop lateral movement."
   },
   {
-    taskId: "constrained_incident_response",
+    id: "constrained_incident_response",
+    name: "Constrained incident response",
     difficulty: "hard",
-    title: "Constrained Incident Response",
-    description: "Respond under legal and business restrictions while minimizing operational impact.",
-    endpoint: "POST /step (task: constrained_incident_response)"
+    max_steps: 40,
+    description:
+      "Respond to an active breach while respecting legal hold, customer-facing, and hard-block constraints."
   }
 ];
 
-function HomePage() {
-  const initialHistory = (() => {
-    try {
-      const raw = localStorage.getItem("soc-openenv-run-history");
-      return raw ? (JSON.parse(raw) as RunRecord[]) : [];
-    } catch {
-      return [];
-    }
-  })();
+const API_ROOT = import.meta.env.VITE_API_BASE_URL ?? window.location.origin;
 
-  const [busyTask, setBusyTask] = useState<Action["taskId"] | null>(null);
-  const [resultText, setResultText] = useState<string>("");
-  const [showHistory, setShowHistory] = useState<boolean>(false);
-  const [runHistory, setRunHistory] = useState<RunRecord[]>(initialHistory);
-  const [searchQuery, setSearchQuery] = useState<string>("");
-  const [fromDate, setFromDate] = useState<string>("");
-  const [toDate, setToDate] = useState<string>("");
-  const [difficultyFilters, setDifficultyFilters] = useState<Array<Action["difficulty"]>>([
-    "easy",
-    "medium",
-    "hard"
-  ]);
-  const apiBase = import.meta.env.VITE_API_BASE_URL ?? window.location.origin;
+const createSuggestedAction = (taskId: TaskId, observation: Observation | null): TaskSeed => {
+  const activeAlerts = observation?.active_alerts ?? [];
+  const hosts = observation?.hosts ?? [];
+  const constraints = observation?.business_constraints ?? [];
 
-  const getRewardMood = (value: number) => {
-    if (value > 0) return "positive";
-    if (value < 0) return "negative";
-    return "neutral";
-  };
+  const firstAlertId = typeof activeAlerts[0]?.alert_id === "string" ? activeAlerts[0].alert_id : "ALT-001";
+  const secondAlertId = typeof activeAlerts[1]?.alert_id === "string" ? activeAlerts[1].alert_id : firstAlertId;
+  const criticalHost = hosts.find((host) => host.is_critical && typeof host.host_id === "string")?.host_id;
+  const legalHoldHost = constraints.find(
+    (constraint) => constraint.constraint_type === "legal_hold" && typeof constraint.host_id === "string"
+  )?.host_id;
+  const preferredHost = criticalHost ?? legalHoldHost ?? hosts[0]?.host_id ?? "HOST-001";
 
-  const filteredHistory = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    const from = fromDate ? new Date(fromDate).getTime() : null;
-    const to = toDate ? new Date(toDate).getTime() : null;
-
-    return runHistory.filter((record) => {
-      const time = new Date(record.createdAt).getTime();
-      const matchesQuery =
-        query.length === 0 ||
-        record.title.toLowerCase().includes(query) ||
-        record.taskId.toLowerCase().includes(query) ||
-        record.message.toLowerCase().includes(query);
-      const matchesFrom = from === null || time >= from;
-      const matchesTo = to === null || time <= to;
-      const matchesDifficulty = difficultyFilters.includes(record.difficulty);
-      return matchesQuery && matchesFrom && matchesTo && matchesDifficulty;
-    });
-  }, [runHistory, searchQuery, fromDate, toDate, difficultyFilters]);
-
-  const toggleDifficultyFilter = (difficulty: Action["difficulty"]) => {
-    setDifficultyFilters((current) => {
-      if (current.includes(difficulty)) {
-        const next = current.filter((d) => d !== difficulty);
-        return next.length === 0 ? current : next;
-      }
-      return [...current, difficulty];
-    });
-  };
-
-  const rankedResults = useMemo(() => {
-    return [...filteredHistory]
-      .filter((r) => r.success)
-      .sort((a, b) => {
-        const aScore = a.gradeScore ?? Number.NEGATIVE_INFINITY;
-        const bScore = b.gradeScore ?? Number.NEGATIVE_INFINITY;
-        if (bScore !== aScore) return bScore - aScore;
-        return b.reward - a.reward;
-      });
-  }, [filteredHistory]);
-
-  const groupedHistory = useMemo(() => {
+  if (taskId === "alert_triage") {
     return {
-      easy: filteredHistory.filter((r) => r.difficulty === "easy"),
-      medium: filteredHistory.filter((r) => r.difficulty === "medium"),
-      hard: filteredHistory.filter((r) => r.difficulty === "hard")
+      action_type: "enrich_alert",
+      alert_id: firstAlertId,
+      source: "threat_intel"
     };
-  }, [filteredHistory]);
+  }
 
-  const saveHistory = (records: RunRecord[]) => {
-    setRunHistory(records);
-    localStorage.setItem("soc-openenv-run-history", JSON.stringify(records));
-  };
-
-  const addRecord = (record: RunRecord) => {
-    const records = [record, ...runHistory].slice(0, 50);
-    saveHistory(records);
-  };
-
-  const exportHistoryJson = () => {
-    const data = JSON.stringify(filteredHistory, null, 2);
-    const blob = new Blob([data], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "soc-openenv-history.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const exportHistoryCsv = () => {
-    const headers = [
-      "id",
-      "createdAt",
-      "title",
-      "taskId",
-      "difficulty",
-      "reward",
-      "gradeScore",
-      "rewardMood",
-      "done",
-      "success",
-      "message"
-    ];
-
-    const escapeCell = (value: string | number | boolean | null) => {
-      const text = String(value ?? "");
-      if (text.includes(",") || text.includes("\n") || text.includes('"')) {
-        return `"${text.split('"').join('""')}"`;
-      }
-      return text;
+  if (taskId === "attack_chain_reconstruction") {
+    return {
+      action_type: "correlate_alerts",
+      alert_ids: [firstAlertId, secondAlertId],
+      correlation_hypothesis: "Linked intrusion activity across multiple hosts"
     };
+  }
 
-    const rows = filteredHistory.map((r) => [
-      r.id,
-      r.createdAt,
-      r.title,
-      r.taskId,
-      r.difficulty,
-      r.reward,
-      r.gradeScore,
-      getRewardMood(r.reward),
-      r.done,
-      r.success,
-      r.message
-    ]);
+  if (constraints.some((constraint) => constraint.constraint_type === "legal_hold")) {
+    return {
+      action_type: "collect_forensics",
+      host_id: String(legalHoldHost ?? preferredHost),
+      artifact_types: ["memory_dump", "event_logs"]
+    };
+  }
 
-    const csv = [headers, ...rows]
-      .map((row) => row.map((cell) => escapeCell(cell as string | number | boolean | null)).join(","))
-      .join("\n");
-
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "soc-openenv-history.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+  return {
+    action_type: "create_ticket",
+    priority: "P1",
+    summary: "Critical incident requires immediate senior analyst review"
   };
+};
 
-  const buildActionPayload = (taskId: Action["taskId"], resetData: ResetResponse) => {
-    const firstAlertId = resetData.active_alerts?.[0]?.alert_id ?? "ALT-001";
-    const firstTwoAlertIds = (resetData.active_alerts ?? [])
-      .map((a) => a.alert_id)
-      .filter((id): id is string => Boolean(id))
-      .slice(0, 2);
+const buildGuidedScript = (taskId: TaskId, observation: Observation | null): TaskSeed[] => {
+  const activeAlerts = observation?.active_alerts ?? [];
+  const hosts = observation?.hosts ?? [];
+  const constraints = observation?.business_constraints ?? [];
+  const firstAlertId = typeof activeAlerts[0]?.alert_id === "string" ? activeAlerts[0].alert_id : "ALT-001";
+  const secondAlertId = typeof activeAlerts[1]?.alert_id === "string" ? activeAlerts[1].alert_id : firstAlertId;
+  const criticalHost = hosts.find((host) => host.is_critical && typeof host.host_id === "string")?.host_id;
+  const legalHoldHost = constraints.find(
+    (constraint) => constraint.constraint_type === "legal_hold" && typeof constraint.host_id === "string"
+  )?.host_id;
+  const customerFacingHost = constraints.find(
+    (constraint) => constraint.constraint_type === "customer_facing" && typeof constraint.host_id === "string"
+  )?.host_id;
+  const hostTarget = criticalHost ?? legalHoldHost ?? customerFacingHost ?? hosts[0]?.host_id ?? "HOST-001";
 
-    if (taskId === "alert_triage") {
-      return {
+  if (taskId === "alert_triage") {
+    return [
+      {
         action_type: "enrich_alert",
         alert_id: firstAlertId,
         source: "threat_intel"
-      };
-    }
+      },
+      {
+        action_type: "create_ticket",
+        priority: "P2",
+        summary: "Escalate the triage outcome and document containment evidence"
+      }
+    ];
+  }
 
-    if (taskId === "attack_chain_reconstruction") {
-      return {
+  if (taskId === "attack_chain_reconstruction") {
+    return [
+      {
+        action_type: "enrich_alert",
+        alert_id: firstAlertId,
+        source: "asset_db"
+      },
+      {
         action_type: "correlate_alerts",
-        alert_ids: firstTwoAlertIds.length > 0 ? firstTwoAlertIds : [firstAlertId],
-        correlation_hypothesis: "Potential linked attacker activity across hosts"
-      };
-    }
+        alert_ids: [firstAlertId, secondAlertId],
+        correlation_hypothesis: "Single intrusion spanning multiple hosts and stages"
+      },
+      {
+        action_type: "isolate_endpoint",
+        host_id: String(hostTarget)
+      },
+      {
+        action_type: "create_ticket",
+        priority: "P1",
+        summary: "Attack chain identified and containment actions executed"
+      }
+    ];
+  }
 
-    return {
+  return [
+    {
+      action_type: "collect_forensics",
+      host_id: String(legalHoldHost ?? hostTarget),
+      artifact_types: ["memory_dump", "event_logs", "network_capture"]
+    },
+    {
+      action_type: "escalate_to_tier2",
+      summary: "Active breach with legal and business constraints requires senior review"
+    },
+    {
       action_type: "create_ticket",
       priority: "P1",
-      summary: "Critical incident initiated via web console"
+      summary: "Open incident record and preserve evidence chain"
+    }
+  ];
+};
+
+const formatJson = (value: unknown) => JSON.stringify(value, null, 2);
+
+function HomePage() {
+  const [tasks, setTasks] = useState<TaskDefinition[]>(FALLBACK_TASKS);
+  const [selectedTaskId, setSelectedTaskId] = useState<TaskId>("alert_triage");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [statusText, setStatusText] = useState<string>("Ready to reset an episode.");
+  const [draftAction, setDraftAction] = useState<string>(formatJson(createSuggestedAction("alert_triage", null)));
+  const [observation, setObservation] = useState<Observation | null>(null);
+  const [stateData, setStateData] = useState<EnvState | null>(null);
+  const [gradeData, setGradeData] = useState<GradeResponse | null>(null);
+  const [trace, setTrace] = useState<RunTrace[]>([]);
+  const [backendError, setBackendError] = useState<string>("");
+
+  const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? tasks[0];
+  const activeAlerts = observation?.active_alerts ?? [];
+  const acknowledgedAlerts = observation?.acknowledged_alerts ?? [];
+  const hosts = observation?.hosts ?? [];
+  const constraints = observation?.business_constraints ?? [];
+  const notes = observation?.notes ?? [];
+
+  const counts = useMemo(() => {
+    return {
+      alerts: activeAlerts.length,
+      acknowledged: acknowledgedAlerts.length,
+      hosts: hosts.length,
+      constraints: constraints.length,
+      notes: notes.length
     };
+  }, [activeAlerts.length, acknowledgedAlerts.length, hosts.length, constraints.length, notes.length]);
+
+  useEffect(() => {
+    const loadTasks = async () => {
+      try {
+        const response = await fetch(`${API_ROOT}/api/tasks`);
+        if (!response.ok) {
+          throw new Error(`Task list request failed with status ${response.status}`);
+        }
+        const payload = (await response.json()) as { tasks?: TaskDefinition[] };
+        if (Array.isArray(payload.tasks) && payload.tasks.length > 0) {
+          setTasks(payload.tasks);
+          if (!payload.tasks.some((task) => task.id === selectedTaskId) && payload.tasks[0]) {
+            setSelectedTaskId(payload.tasks[0].id);
+          }
+        }
+        setBackendError("");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load tasks";
+        setBackendError(message);
+      }
+    };
+
+    void loadTasks();
+  }, []);
+
+  useEffect(() => {
+    setDraftAction(formatJson(createSuggestedAction(selectedTaskId, observation)));
+  }, [selectedTaskId]);
+
+  useEffect(() => {
+    if (!tasks.some((task) => task.id === selectedTaskId) && tasks[0]) {
+      setSelectedTaskId(tasks[0].id);
+    }
+  }, [tasks, selectedTaskId]);
+
+  const pushTrace = (
+    entry: Omit<RunTrace, "id" | "createdAt">
+  ) => {
+    setTrace((current) => [
+      {
+        ...entry,
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        createdAt: new Date().toISOString()
+      },
+      ...current
+    ].slice(0, 32));
   };
 
-  const runScenario = async (actionMeta: Action) => {
-    const { taskId, title, difficulty } = actionMeta;
-    setBusyTask(taskId);
-    setResultText(`Running ${title}...`);
+  const syncState = async (taskId: TaskId) => {
+    const response = await fetch(`${API_ROOT}/state?task_id=${taskId}`);
+    if (!response.ok) {
+      throw new Error(`State request failed with status ${response.status}`);
+    }
+    const payload = (await response.json()) as EnvState;
+    setStateData(payload);
+    return payload;
+  };
 
+  const resetEpisode = async (taskId: TaskId = selectedTaskId) => {
+    setBusy("reset");
+    setStatusText(`Resetting ${taskId}...`);
     try {
-      const resetResponse = await fetch(`${apiBase}/reset`, {
+      const response = await fetch(`${API_ROOT}/reset`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ task_id: taskId, seed: 42 })
       });
 
-      if (!resetResponse.ok) {
-        throw new Error(`Reset failed with status ${resetResponse.status}`);
+      if (!response.ok) {
+        const details = await response.text();
+        throw new Error(`Reset failed (${response.status}): ${details}`);
       }
 
-      const resetData = (await resetResponse.json()) as ResetResponse;
-      const action = buildActionPayload(taskId, resetData);
+      const payload = (await response.json()) as Observation;
+      setObservation(payload);
+      const state = await syncState(taskId);
+      setGradeData(null);
+      setBackendError("");
+      setDraftAction(formatJson(createSuggestedAction(taskId, payload)));
+      setStatusText(`Episode reset for ${taskId}. Ready for the next action.`);
+      pushTrace({
+        kind: "reset",
+        title: "Episode reset",
+        detail: `Loaded ${taskId} with ${payload.active_alerts.length} active alerts and ${payload.hosts.length} hosts.`
+      });
+      return { observation: payload, state };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown reset error";
+      setBackendError(message);
+      setStatusText("Reset failed.");
+      pushTrace({
+        kind: "error",
+        title: "Reset error",
+        detail: message
+      });
+      throw error;
+    } finally {
+      setBusy(null);
+    }
+  };
 
-      const stepResponse = await fetch(`${apiBase}/step`, {
+  const parseDraft = () => {
+    const parsed = JSON.parse(draftAction) as TaskSeed;
+    if (!parsed || typeof parsed !== "object" || typeof parsed.action_type !== "string") {
+      throw new Error("Action JSON must include action_type.");
+    }
+    return parsed;
+  };
+
+  const sendStep = async (action: TaskSeed, label: string) => {
+    setBusy("step");
+    setStatusText(`${label}...`);
+
+    try {
+      const response = await fetch(`${API_ROOT}/step`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task_id: taskId, action })
+        body: JSON.stringify({ task_id: selectedTaskId, action })
       });
 
-      if (!stepResponse.ok) {
-        const details = await stepResponse.text();
-        throw new Error(`Step failed (${stepResponse.status}): ${details}`);
+      if (!response.ok) {
+        const details = await response.text();
+        throw new Error(`Step failed (${response.status}): ${details}`);
       }
 
-      const stepData = (await stepResponse.json()) as StepResponse;
-      const reward = stepData.reward?.total ?? 0;
-      const done = Boolean(stepData.done);
-      const gradeResponse = await fetch(`${apiBase}/grade?task_id=${taskId}`, {
+      const payload = (await response.json()) as StepResponse;
+      const nextObservation = payload.observation ?? null;
+      setObservation(nextObservation);
+      const state = await syncState(selectedTaskId);
+      setBackendError("");
+      const reward = payload.reward?.total ?? 0;
+      const done = Boolean(payload.done);
+      const actionType = action.action_type;
+      setStatusText(`${label} complete. Reward ${reward.toFixed(3)}. Done: ${done ? "yes" : "no"}.`);
+      pushTrace({
+        kind: "step",
+        title: label,
+        detail: payload.reward?.info ?? `Action ${actionType} executed.`,
+        reward,
+        done,
+        actionType
+      });
+      return { payload, state };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown step error";
+      setBackendError(message);
+      setStatusText("Action failed.");
+      pushTrace({
+        kind: "error",
+        title: "Step error",
+        detail: message
+      });
+      throw error;
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const gradeEpisode = async () => {
+    setBusy("grade");
+    setStatusText(`Grading ${selectedTaskId}...`);
+
+    try {
+      const response = await fetch(`${API_ROOT}/grade?task_id=${selectedTaskId}`, {
         method: "POST"
       });
-      const gradeData = gradeResponse.ok ? ((await gradeResponse.json()) as GradeResponse) : null;
-      const gradeScore = typeof gradeData?.score === "number" ? gradeData.score : null;
-      const message =
-        `${title} completed. Reward: ${reward.toFixed(3)} | ` +
-        `Grade: ${gradeScore === null ? "n/a" : gradeScore.toFixed(3)} | Done: ${done ? "yes" : "no"}`;
-      setResultText(message);
-      addRecord({
-        id: `${Date.now()}-${taskId}`,
-        title,
-        taskId,
-        difficulty,
-        reward,
-        gradeScore,
-        done,
-        success: true,
-        message,
-        createdAt: new Date().toISOString()
+
+      if (!response.ok) {
+        const details = await response.text();
+        throw new Error(`Grade failed (${response.status}): ${details}`);
+      }
+
+      const payload = (await response.json()) as GradeResponse;
+      setGradeData(payload);
+      setBackendError("");
+      const score = typeof payload.score === "number" ? payload.score : 0;
+      setStatusText(`Grade complete. Score ${score.toFixed(3)}.`);
+      pushTrace({
+        kind: "grade",
+        title: "Episode graded",
+        detail: `Task ${selectedTaskId} scored ${score.toFixed(3)}.`,
+        reward: score
       });
+      return payload;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown request error";
-      const finalMessage = `Request error: ${message}`;
-      setResultText(finalMessage);
-      addRecord({
-        id: `${Date.now()}-${taskId}`,
-        title,
-        taskId,
-        difficulty,
-        reward: 0,
-        gradeScore: null,
-        done: false,
-        success: false,
-        message: finalMessage,
-        createdAt: new Date().toISOString()
+      const message = error instanceof Error ? error.message : "Unknown grade error";
+      setBackendError(message);
+      setStatusText("Grade failed.");
+      pushTrace({
+        kind: "error",
+        title: "Grade error",
+        detail: message
       });
+      throw error;
     } finally {
-      setBusyTask(null);
+      setBusy(null);
     }
+  };
+
+  const runGuidedDemo = async () => {
+    setBusy("demo");
+    setBackendError("");
+    try {
+      const resetResult = await resetEpisode(selectedTaskId);
+      const script = buildGuidedScript(selectedTaskId, resetResult.observation);
+      for (const [index, action] of script.entries()) {
+        const response = await sendStep(action, `Guided step ${index + 1}`);
+        if (response.payload.done) {
+          break;
+        }
+      }
+      await gradeEpisode();
+      setStatusText(`Guided demo completed for ${selectedTaskId}.`);
+    } catch {
+      // errors already surfaced in trace and status
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const loadSuggestedAction = () => {
+    setDraftAction(formatJson(createSuggestedAction(selectedTaskId, observation)));
+  };
+
+  const submitDraftAction = async () => {
+    const action = parseDraft();
+    await sendStep(action, `Manual step for ${selectedTaskId}`);
   };
 
   return (
     <section className="page page-home">
-      <div className="hero-card reveal">
-        <p className="section-label">Mission Control</p>
-        <h2>Train and evaluate autonomous SOC decision-making.</h2>
-        <p>
-          This interface highlights the three core actions your environment supports. Each button is styled
-          as a high-contrast command switch with tactile pop animation and hover lift.
-        </p>
+      <div className="hero-card hero-console reveal">
+        <div className="hero-copy">
+          <p className="section-label">OpenEnv hackathon demo</p>
+          <h2>Security Operations Center simulation with live reset, step, state, and grade flows.</h2>
+          <p>
+            The environment is the simulator. The model is only the policy that emits JSON actions. This
+            console shows both sides clearly so judges can inspect the episode, the response, the reward, and
+            the final score without reading code.
+          </p>
+        </div>
+
+        <div className="hero-stats" aria-label="Environment summary">
+          <div className="stat-card">
+            <span>Tasks</span>
+            <strong>{tasks.length}</strong>
+            <small>easy → hard</small>
+          </div>
+          <div className="stat-card">
+            <span>Backend</span>
+            <strong>FastAPI</strong>
+            <small>/reset /step /state /grade</small>
+          </div>
+          <div className="stat-card">
+            <span>Baseline</span>
+            <strong>HF router</strong>
+            <small>OpenAI client compatible</small>
+          </div>
+        </div>
       </div>
 
-      <div className="actions-grid">
-        {actions.map((action, index) => (
-          <article className="action-card reveal" style={{ animationDelay: `${index * 0.12}s` }} key={action.title}>
-            <h3>{action.title}</h3>
-            <p>{action.description}</p>
-            <button
-              type="button"
-              className="pop-button"
-              onClick={() => runScenario(action)}
-              disabled={busyTask !== null}
-            >
-              {busyTask === action.taskId ? "Running..." : `Run ${action.title}`}
-            </button>
-            <span>{action.endpoint}</span>
+      <div className="console-layout">
+        <aside className="console-sidebar">
+          <article className="panel reveal">
+            <p className="section-label">Tasks</p>
+            <h3>Available scenarios</h3>
+            <div className="task-list">
+              {tasks.map((task, index) => (
+                <button
+                  key={task.id}
+                  type="button"
+                  className={`task-card ${selectedTaskId === task.id ? "active" : ""} reveal`}
+                  style={{ animationDelay: `${index * 0.08}s` }}
+                  onClick={() => setSelectedTaskId(task.id)}
+                >
+                  <div className="task-card-head">
+                    <strong>{task.name}</strong>
+                    <span>{task.difficulty.toUpperCase()}</span>
+                  </div>
+                  <p>{task.description}</p>
+                  <small>{task.max_steps} max steps</small>
+                </button>
+              ))}
+            </div>
           </article>
-        ))}
-      </div>
 
-      <div className="hero-card reveal" style={{ marginTop: "1rem" }}>
-        <p className="section-label">Live API Result</p>
-        <h2>Execution Output</h2>
-        <p>{resultText || "Click any action button to call the backend endpoints."}</p>
+          <article className="panel reveal" style={{ animationDelay: "0.08s" }}>
+            <p className="section-label">Controls</p>
+            <h3>Episode actions</h3>
+            <div className="control-stack">
+              <button type="button" className="primary-button" onClick={() => void resetEpisode()} disabled={busy !== null}>
+                {busy === "reset" ? "Resetting..." : "Reset episode"}
+              </button>
+              <button type="button" className="primary-button ghost" onClick={loadSuggestedAction} disabled={busy !== null}>
+                Load suggested action
+              </button>
+              <button type="button" className="primary-button" onClick={() => void submitDraftAction()} disabled={busy !== null}>
+                {busy === "step" ? "Sending action..." : "Run draft action"}
+              </button>
+              <button type="button" className="primary-button ghost" onClick={() => void gradeEpisode()} disabled={busy !== null}>
+                {busy === "grade" ? "Grading..." : "Grade current episode"}
+              </button>
+              <button type="button" className="primary-button accent" onClick={() => void runGuidedDemo()} disabled={busy !== null}>
+                {busy === "demo" ? "Running demo..." : "Run guided demo"}
+              </button>
+            </div>
 
-        <div className="results-toolbar">
-          <button
-            type="button"
-            className="pop-button small"
-            onClick={() => setShowHistory((v) => !v)}
-          >
-            {showHistory ? "Hide History" : "History"}
-          </button>
-          <button
-            type="button"
-            className="pop-button small ghost"
-            onClick={() => saveHistory([])}
-            disabled={runHistory.length === 0}
-          >
-            Clear Results
-          </button>
-          <button
-            type="button"
-            className="pop-button small ghost"
-            onClick={exportHistoryJson}
-            disabled={filteredHistory.length === 0}
-          >
-            Export JSON
-          </button>
-          <button
-            type="button"
-            className="pop-button small ghost"
-            onClick={exportHistoryCsv}
-            disabled={filteredHistory.length === 0}
-          >
-            Export CSV
-          </button>
-        </div>
+            <div className="status-block">
+              <span>Status</span>
+              <strong>{statusText}</strong>
+              <small>{backendError || `Connected to ${API_ROOT}`}</small>
+            </div>
+          </article>
+        </aside>
 
-        <div className="history-filters">
-          <input
-            type="text"
-            placeholder="Search task, title, or message"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-          <input
-            type="datetime-local"
-            value={fromDate}
-            onChange={(e) => setFromDate(e.target.value)}
-          />
-          <input
-            type="datetime-local"
-            value={toDate}
-            onChange={(e) => setToDate(e.target.value)}
-          />
-        </div>
-
-        <div className="chip-row">
-          {(["easy", "medium", "hard"] as const).map((difficulty) => (
-            <button
-              key={difficulty}
-              type="button"
-              className={`chip ${difficultyFilters.includes(difficulty) ? "active" : ""}`}
-              onClick={() => toggleDifficultyFilter(difficulty)}
-            >
-              {difficulty.toUpperCase()}
-            </button>
-          ))}
-        </div>
-
-        <div className="ranking-grid">
-          <article className="output-card">
-            <h3>Ranked Results</h3>
-            {rankedResults.length === 0 && <p>No successful runs yet.</p>}
-            {rankedResults.map((result, index) => (
-              <div className="rank-row" key={result.id}>
-                <span>#{index + 1}</span>
-                <strong>{result.title}</strong>
-                <em>G:{result.gradeScore === null ? "n/a" : result.gradeScore.toFixed(3)} | R:{result.reward.toFixed(3)}</em>
+        <section className="console-main">
+          <article className="panel reveal">
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Active episode</p>
+                <h3>{selectedTask?.name ?? selectedTaskId}</h3>
               </div>
-            ))}
+              <div className="score-pill-row">
+                <span className="score-pill">Reward {stateData?.cumulative_reward?.toFixed(3) ?? "0.000"}</span>
+                <span className="score-pill">Step {stateData?.step ?? observation?.step ?? 0}</span>
+                <span className="score-pill">Done {stateData?.done ? "yes" : "no"}</span>
+              </div>
+            </div>
+
+            <p className="panel-note">
+              {selectedTask?.description ?? "Select a task to inspect the current incident."}
+            </p>
+
+            <div className="metric-grid">
+              <div className="metric-card">
+                <span>Active alerts</span>
+                <strong>{counts.alerts}</strong>
+              </div>
+              <div className="metric-card">
+                <span>Acknowledged</span>
+                <strong>{counts.acknowledged}</strong>
+              </div>
+              <div className="metric-card">
+                <span>Hosts</span>
+                <strong>{counts.hosts}</strong>
+              </div>
+              <div className="metric-card">
+                <span>Constraints</span>
+                <strong>{counts.constraints}</strong>
+              </div>
+            </div>
+
+            <div className="json-grid">
+              <div className="json-card">
+                <div className="json-card-head">
+                  <h4>Current observation</h4>
+                  <small>Visible to the agent</small>
+                </div>
+                <pre>{formatJson(observation ?? { note: "Reset an episode to load data." })}</pre>
+              </div>
+
+              <div className="json-card">
+                <div className="json-card-head">
+                  <h4>Backend state</h4>
+                  <small>Includes hidden grading state</small>
+                </div>
+                <pre>{formatJson(stateData ?? { note: "State appears after the first reset." })}</pre>
+              </div>
+            </div>
           </article>
 
-          {showHistory && (
-            <article className="output-card">
-              <h3>History</h3>
-              {(["easy", "medium", "hard"] as const).map((difficulty) => (
-                <div key={difficulty} className="history-group">
-                  <h4>{difficulty.toUpperCase()}</h4>
-                  {groupedHistory[difficulty].length === 0 && <p>No runs.</p>}
-                  {groupedHistory[difficulty].map((item) => (
-                    <div className="history-row" key={item.id}>
-                      <span>{new Date(item.createdAt).toLocaleTimeString()}</span>
-                      <strong>{item.title}</strong>
-                      <em>{item.success ? item.reward.toFixed(3) : "ERR"}</em>
-                      <i className={`reward-mood ${getRewardMood(item.reward)}`}>
-                        {getRewardMood(item.reward)}
-                      </i>
-                    </div>
-                  ))}
+          <article className="panel reveal" style={{ animationDelay: "0.08s" }}>
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Action draft</p>
+                <h3>JSON action submitted to /step</h3>
+              </div>
+              <div className="score-pill-row">
+                <span className="score-pill">HF client</span>
+                <span className="score-pill">Deterministic grader</span>
+              </div>
+            </div>
+
+            <textarea
+              className="draft-editor"
+              value={draftAction}
+              onChange={(event) => setDraftAction(event.target.value)}
+              spellCheck={false}
+            />
+
+            <div className="panel-actions">
+              <button type="button" className="secondary-button" onClick={loadSuggestedAction} disabled={busy !== null}>
+                Load suggested JSON
+              </button>
+              <button type="button" className="secondary-button accent" onClick={() => void submitDraftAction()} disabled={busy !== null}>
+                Execute draft action
+              </button>
+            </div>
+
+            {gradeData && (
+              <div className="grade-card">
+                <strong>Final score: {typeof gradeData.score === "number" ? gradeData.score.toFixed(4) : "n/a"}</strong>
+                <pre>{formatJson(gradeData.breakdown ?? {})}</pre>
+              </div>
+            )}
+          </article>
+
+          <article className="panel reveal" style={{ animationDelay: "0.16s" }}>
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Trace</p>
+                <h3>Episode timeline</h3>
+              </div>
+              <div className="score-pill-row">
+                <span className="score-pill">Max {selectedTask?.max_steps ?? 0} steps</span>
+                <span className="score-pill">{trace.length} events</span>
+              </div>
+            </div>
+
+            <div className="trace-list">
+              {trace.length === 0 && <p className="empty-state">Run reset, step, or grade to populate the trace.</p>}
+              {trace.map((entry) => (
+                <div className={`trace-item ${entry.kind}`} key={entry.id}>
+                  <div>
+                    <strong>{entry.title}</strong>
+                    <p>{entry.detail}</p>
+                    <small>{new Date(entry.createdAt).toLocaleTimeString()}</small>
+                  </div>
+                  <div className="trace-meta">
+                    {entry.actionType && <span>{entry.actionType}</span>}
+                    {typeof entry.reward === "number" && <span>reward {entry.reward.toFixed(3)}</span>}
+                    {typeof entry.done === "boolean" && <span>done {entry.done ? "yes" : "no"}</span>}
+                  </div>
                 </div>
               ))}
-            </article>
-          )}
-        </div>
+            </div>
+          </article>
+
+          <article className="panel reveal" style={{ animationDelay: "0.24s" }}>
+            <div className="panel-head">
+              <div>
+                <p className="section-label">Incident snapshot</p>
+                <h3>Alerts, hosts, constraints, and notes</h3>
+              </div>
+            </div>
+
+            <div className="detail-grid">
+              <div className="detail-column">
+                <h4>Active alerts</h4>
+                {activeAlerts.length === 0 && <p className="empty-state">No active alerts yet.</p>}
+                {activeAlerts.map((alert, index) => (
+                  <div className="detail-card" key={alert.alert_id ?? index}>
+                    <strong>{alert.alert_id ?? `Alert ${index + 1}`}</strong>
+                    <p>{alert.rule_name ?? "No rule name"}</p>
+                    <small>
+                      Host {alert.host_id ?? "n/a"} | Severity {alert.severity ?? "n/a"} | Tactic {alert.mitre_tactic ?? "n/a"}
+                    </small>
+                  </div>
+                ))}
+              </div>
+
+              <div className="detail-column">
+                <h4>Hosts</h4>
+                {hosts.length === 0 && <p className="empty-state">No hosts loaded yet.</p>}
+                {hosts.map((host, index) => (
+                  <div className="detail-card" key={host.host_id ?? index}>
+                    <strong>{host.hostname ?? host.host_id ?? `Host ${index + 1}`}</strong>
+                    <p>{host.role ?? "Unknown role"}</p>
+                    <small>
+                      {host.host_id ?? "n/a"} | {host.status ?? "n/a"} | critical {host.is_critical ? "yes" : "no"} | vip {host.is_vip ? "yes" : "no"}
+                    </small>
+                  </div>
+                ))}
+              </div>
+
+              <div className="detail-column">
+                <h4>Constraints</h4>
+                {constraints.length === 0 && <p className="empty-state">No business constraints loaded yet.</p>}
+                {constraints.map((constraint, index) => (
+                  <div className="detail-card" key={`${constraint.constraint_type ?? "constraint"}-${index}`}>
+                    <strong>{constraint.constraint_type ?? "Constraint"}</strong>
+                    <p>{constraint.reason ?? "No reason provided"}</p>
+                    <small>
+                      Severity {constraint.severity ?? "n/a"} | host {constraint.host_id ?? "n/a"} | user {constraint.user_id ?? "n/a"}
+                    </small>
+                  </div>
+                ))}
+              </div>
+
+              <div className="detail-column">
+                <h4>Recent notes</h4>
+                {notes.length === 0 && <p className="empty-state">No investigation notes yet.</p>}
+                {notes.map((note, index) => (
+                  <div className="detail-card" key={`${note.step ?? index}-${index}`}>
+                    <strong>Step {note.step ?? index + 1}</strong>
+                    <p>{note.action_taken ?? "No action"}</p>
+                    <small>{note.finding ?? "No finding"}</small>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </article>
+        </section>
       </div>
     </section>
   );
