@@ -160,7 +160,7 @@ def parse_action(response_text: str, obs: dict) -> Action:
 # ---------------------------------------------------------------------------
 
 def run_task(client: OpenAI, task_id: str) -> Dict[str, Any]:
-    print(f"[START] task={task_id} seed={SEED} model={MODEL_NAME}", flush=True)
+    print(f"[START] task={task_id}", flush=True)
 
     env = SOCEnv(task_id=task_id, seed=SEED)
     obs = env.reset()
@@ -206,13 +206,9 @@ def run_task(client: OpenAI, task_id: str) -> Dict[str, Any]:
             "[STEP] "
             f"task={task_id} "
             f"step={step_num} "
-            f"action={action.action_type.value} "
-            f"payload={json.dumps(payload, separators=(',', ':'))} "
             f"reward={reward.total:+.3f} "
-            f"cumulative={total_reward:+.3f} "
-            f"fallback={str(used_fallback).lower()} "
-            f"llm_error={json.dumps(llm_error) if llm_error is not None else 'null'} "
-            f"done={str(done).lower()}",
+            f"done={str(done).lower()} "
+            f"action={action.action_type.value}",
             flush=True,
         )
 
@@ -223,9 +219,8 @@ def run_task(client: OpenAI, task_id: str) -> Dict[str, Any]:
     print(
         "[END] "
         f"task={task_id} "
-        f"steps={step_num} "
-        f"cumulative_reward={total_reward:+.4f} "
-        f"score={score:.4f}",
+        f"score={score:.4f} "
+        f"steps={step_num}",
         flush=True,
     )
     return {
@@ -260,7 +255,7 @@ def main():
 
     for r in results:
         print(
-            f"[END] task={r['task_id']} summary=true score={r['final_score']:.4f} reward={r['cumulative_reward']:+.4f}",
+            f"SUMMARY task={r['task_id']} score={r['final_score']:.4f} reward={r['cumulative_reward']:+.4f}",
             flush=True,
         )
 
