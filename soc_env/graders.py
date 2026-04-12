@@ -2,7 +2,7 @@
 Deterministic graders for all 3 tasks.
 Every grader:
   - Takes EnvState (includes ground truth)
-  - Returns float in [0.0, 1.0]
+    - Returns float strictly in (0.0, 1.0)
   - Is 100% deterministic: same state -> same score
 """
 from __future__ import annotations
@@ -11,18 +11,26 @@ from typing import Dict, Tuple
 from .models import EnvState, HostStatus
 
 
+_SCORE_EPS = 1e-4
+
+
+def _strict_score(value: float) -> float:
+    """Clamp score to a strict open interval required by deployment validators."""
+    return max(_SCORE_EPS, min(1.0 - _SCORE_EPS, value))
+
+
 # ---------------------------------------------------------------------------
 # Task 1 — Easy: Alert triage
 # ---------------------------------------------------------------------------
 
 def grade_task_easy(state: EnvState) -> float:
     _, score = _score_alert_triage(state)
-    return round(score, 4)
+    return round(_strict_score(score), 4)
 
 
 def grade_task_easy_detailed(state: EnvState) -> Tuple[Dict, float]:
     breakdown, score = _score_alert_triage(state)
-    return breakdown, round(score, 4)
+    return breakdown, round(_strict_score(score), 4)
 
 
 def _score_alert_triage(state: EnvState) -> Tuple[Dict, float]:
@@ -84,12 +92,12 @@ def _score_alert_triage(state: EnvState) -> Tuple[Dict, float]:
 
 def grade_task_medium(state: EnvState) -> float:
     _, score = _score_chain_reconstruction(state)
-    return round(score, 4)
+    return round(_strict_score(score), 4)
 
 
 def grade_task_medium_detailed(state: EnvState) -> Tuple[Dict, float]:
     breakdown, score = _score_chain_reconstruction(state)
-    return breakdown, round(score, 4)
+    return breakdown, round(_strict_score(score), 4)
 
 
 def _score_chain_reconstruction(state: EnvState) -> Tuple[Dict, float]:
@@ -149,12 +157,12 @@ def _score_chain_reconstruction(state: EnvState) -> Tuple[Dict, float]:
 
 def grade_task_hard(state: EnvState) -> float:
     _, score = _score_constrained_response(state)
-    return round(score, 4)
+    return round(_strict_score(score), 4)
 
 
 def grade_task_hard_detailed(state: EnvState) -> Tuple[Dict, float]:
     breakdown, score = _score_constrained_response(state)
-    return breakdown, round(score, 4)
+    return breakdown, round(_strict_score(score), 4)
 
 
 def _score_constrained_response(state: EnvState) -> Tuple[Dict, float]:

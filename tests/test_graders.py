@@ -22,7 +22,7 @@ def run_episode(task_id, steps=8, seed=42):
 @pytest.mark.parametrize("task_id", SOCEnv.TASK_IDS)
 def test_grade_bounded(task_id):
     score = run_episode(task_id).grade()
-    assert 0.0 <= score <= 1.0
+    assert 0.0 < score < 1.0
 
 
 @pytest.mark.parametrize("task_id", SOCEnv.TASK_IDS)
