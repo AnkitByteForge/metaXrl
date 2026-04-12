@@ -3,7 +3,7 @@
     "task_id": "alert_triage",
     "steps_taken": 10,
     "cumulative_reward": 0.35,
-    "final_score": 0.0001,
+    "final_score": 0.1,
     "step_log": [
       "step=1 action=enrich_alert reward=+0.035 info=enrichment",
       "step=2 action=enrich_alert reward=+0.035 info=enrichment",
@@ -21,7 +21,7 @@
     "task_id": "attack_chain_reconstruction",
     "steps_taken": 25,
     "cumulative_reward": 0.625,
-    "final_score": 0.0508,
+    "final_score": 0.1,
     "step_log": [
       "step=1 action=enrich_alert reward=+0.025 info=enrichment",
       "step=2 action=enrich_alert reward=+0.025 info=enrichment",

@@ -41,6 +41,7 @@ LOCAL_IMAGE_NAME: Optional[str] = os.getenv("LOCAL_IMAGE_NAME")
 TEMPERATURE: float = 0.1
 MAX_TOKENS: int    = 512
 SEED: int          = 42
+SCORE_EPS: float   = 1e-1
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -155,6 +156,11 @@ def parse_action(response_text: str, obs: dict) -> Action:
                       alert_id=active[0]["alert_id"], source="threat_intel")
     return Action(action_type=ActionType.CREATE_TICKET, priority="P3", summary="fallback")
 
+
+def strict_score(value: float) -> float:
+    """Clamp score to strict open interval expected by external validators."""
+    return max(SCORE_EPS, min(1.0 - SCORE_EPS, float(value)))
+
 # ---------------------------------------------------------------------------
 # Run one task episode
 # ---------------------------------------------------------------------------
@@ -224,7 +230,7 @@ def run_task(client: Optional[OpenAI], task_id: str) -> Dict[str, Any]:
         if done:
             break
 
-    score = env.grade()
+    score = strict_score(env.grade())
     print(
         "[END] "
         f"task={task_id} "

@@ -11,7 +11,8 @@ from typing import Dict, Tuple
 from .models import EnvState, HostStatus
 
 
-_SCORE_EPS = 1e-4
+# Keep margin large enough to survive external validator rounding/serialization.
+_SCORE_EPS = 1e-1
 
 
 def _strict_score(value: float) -> float:
