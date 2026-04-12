@@ -34,4 +34,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
       -H "Content-Type: application/json" \
       -d '{"task_id":"alert_triage"}' || exit 1
 
-CMD ["python", "server.py"]
+#CMD ["python", "root_server.py"]
+CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860"]
