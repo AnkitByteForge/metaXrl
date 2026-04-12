@@ -159,8 +159,8 @@ def parse_action(response_text: str, obs: dict) -> Action:
 # Run one task episode
 # ---------------------------------------------------------------------------
 
-def run_task(client: OpenAI, task_id: str) -> Dict[str, Any]:
-    print(f"START task={task_id} seed={SEED} model={MODEL_NAME}", flush=True)
+def run_task(client: Optional[OpenAI], task_id: str) -> Dict[str, Any]:
+    print(f"[START] task={task_id} seed={SEED} model={MODEL_NAME}", flush=True)
 
     env = SOCEnv(task_id=task_id, seed=SEED)
     obs = env.reset()
@@ -173,21 +173,26 @@ def run_task(client: OpenAI, task_id: str) -> Dict[str, Any]:
         user_prompt = observation_to_prompt(obs_dict, step_num)
         llm_error: Optional[str] = None
         used_fallback = False
-        try:
-            completion = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": user_prompt},
-                ],
-                temperature=TEMPERATURE,
-                max_tokens=MAX_TOKENS,
-            )
-            response_text = completion.choices[0].message.content or ""
-        except Exception as exc:
-            llm_error = str(exc)
+        if client is None:
             used_fallback = True
+            llm_error = "client_unavailable"
             response_text = ""
+        else:
+            try:
+                completion = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user",   "content": user_prompt},
+                    ],
+                    temperature=TEMPERATURE,
+                    max_tokens=MAX_TOKENS,
+                )
+                response_text = completion.choices[0].message.content or ""
+            except Exception as exc:
+                llm_error = str(exc)
+                used_fallback = True
+                response_text = ""
 
         action = parse_action(response_text, obs_dict)
         payload = {k: v for k, v in action.model_dump().items() if v is not None and k != "action_type"}
@@ -203,7 +208,7 @@ def run_task(client: OpenAI, task_id: str) -> Dict[str, Any]:
         total_reward += reward.total
         step_log.append(f"step={step_num} action={action.action_type.value} reward={reward.total:+.3f} info={reward.info}")
         print(
-            "STEP "
+            "[STEP] "
             f"task={task_id} "
             f"step={step_num} "
             f"action={action.action_type.value} "
@@ -221,7 +226,7 @@ def run_task(client: OpenAI, task_id: str) -> Dict[str, Any]:
 
     score = env.grade()
     print(
-        "END "
+        "[END] "
         f"task={task_id} "
         f"steps={step_num} "
         f"cumulative_reward={total_reward:+.4f} "
@@ -247,11 +252,11 @@ def main():
     parser.add_argument("--seed", type=int, default=SEED)
     args = parser.parse_args()
 
-    if not HF_TOKEN:
-        print("ERROR: HF_TOKEN is required and must be set in the environment.")
-        sys.exit(1)
-
-    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+    client: Optional[OpenAI] = None
+    if HF_TOKEN:
+        client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+    else:
+        print("WARN: HF_TOKEN not set. Running with deterministic fallback actions.", flush=True)
     tasks  = SOCEnv.TASK_IDS if args.task == "all" else [args.task]
     results = []
 
