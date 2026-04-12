@@ -54,7 +54,7 @@
     "task_id": "constrained_incident_response",
     "steps_taken": 40,
     "cumulative_reward": 0.8,
-    "final_score": 0.426,
+    "final_score": 0.44,
     "step_log": [
       "step=1 action=enrich_alert reward=+0.020 info=enrichment",
       "step=2 action=enrich_alert reward=+0.020 info=enrichment",

@@ -42,7 +42,7 @@ def _score_alert_triage(state: EnvState) -> Tuple[Dict, float]:
     """
     all_alerts = state.observation.active_alerts + state.observation.acknowledged_alerts
     if not all_alerts:
-        return {}, 0.0
+        return {}, _strict_score(0.0)
 
     tp_alerts = [a for a in all_alerts if a.ground_truth is True]
     fp_alerts = [a for a in all_alerts if a.ground_truth is False]
@@ -72,9 +72,9 @@ def _score_alert_triage(state: EnvState) -> Tuple[Dict, float]:
     fp_isolations = sum(1 for h in state.isolated_hosts if h in fp_host_ids)
     fp_penalty = min(fp_isolations * 0.1, 0.3)
 
-    final = max(0.0, min(1.0, round(
+    final = _strict_score(round(
         0.6 * classification_accuracy + 0.4 * action_score - fp_penalty, 4
-    )))
+    ))
     breakdown = {
         "classification_accuracy": round(classification_accuracy, 3),
         "action_score": round(action_score, 3),
@@ -110,7 +110,7 @@ def _score_chain_reconstruction(state: EnvState) -> Tuple[Dict, float]:
     """
     chain = state.attack_chain
     if not chain:
-        return {}, 0.0
+        return {}, _strict_score(0.0)
 
     # Chain coverage
     true_stages = set(chain.stages)
@@ -134,9 +134,9 @@ def _score_chain_reconstruction(state: EnvState) -> Tuple[Dict, float]:
     fp_isolations = sum(1 for h in state.isolated_hosts if h not in all_chain_hosts)
     fp_penalty = min(fp_isolations * 0.05, 0.1)
 
-    final = max(0.0, min(1.0, round(
+    final = _strict_score(round(
         0.5 * chain_coverage + 0.3 * containment_score - dwell_penalty - fp_penalty, 4
-    )))
+    ))
     breakdown = {
         "chain_coverage": round(chain_coverage, 3),
         "stages_found": len(found_stages & true_stages),
@@ -218,9 +218,9 @@ def _score_constrained_response(state: EnvState) -> Tuple[Dict, float]:
         4,
     )
 
-    final = max(0.0, min(1.0, round(
+    final = _strict_score(round(
         0.40 * security_score + 0.35 * business_continuity + 0.25 * compliance_score, 4
-    )))
+    ))
     breakdown = {
         "security_score": round(security_score, 3),
         "business_continuity": round(business_continuity, 3),
