@@ -268,4 +268,4 @@ soc-openenv/
 
 ## Contact
 
-help_openenvhackathon@scaler.com
+ankit.k23@iiits.in
