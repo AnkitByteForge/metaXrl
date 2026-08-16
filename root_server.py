@@ -134,7 +134,7 @@ def grade(task_id: str = "alert_triage"):
     s = env.state()
     if task_id == "alert_triage":
         breakdown, score = grade_task_easy_detailed(s)
-    elif task_id == "attack_chain_reconstruction":
+    elif task_id in ("attack_chain_reconstruction", "real_world_incident"):
         breakdown, score = grade_task_medium_detailed(s)
     else:
         breakdown, score = grade_task_hard_detailed(s)
