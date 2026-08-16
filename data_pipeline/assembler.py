@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set
 
-from .mapper import to_network_host, to_siem_alert
+from .mapper import _host_id, to_network_host, to_siem_alert
 from .parsers import RawEvent
 
 
@@ -42,6 +42,8 @@ def _build_episode(bucket: List[RawEvent], ioc_table: Dict[str, Set[str]]) -> Op
     if not bucket:
         return None
 
+    # bucket is time-sorted by the caller, and alerts are built in the same order,
+    # so alerts is also time-sorted -- preserve that ordering for chronological logic.
     alerts = [to_siem_alert(e, i, ioc_table) for i, e in enumerate(bucket)]
     malicious_alerts = [a for a in alerts if a.ground_truth]
     benign_alerts = [a for a in alerts if not a.ground_truth]
@@ -52,10 +54,27 @@ def _build_episode(bucket: List[RawEvent], ioc_table: Dict[str, Set[str]]) -> Op
     malicious_hosts = sorted({a.host_id for a in malicious_alerts})
     hosts = [to_network_host(h, compromised=h in malicious_hosts) for h in host_ids]
 
-    patient_zero = malicious_hosts[0]
-    lateral_targets = malicious_hosts[1:]
-    crown_jewel = host_ids[-1]
+    # Patient zero is the host of the chronologically-earliest malicious alert,
+    # not the alphabetically-first host id.
+    patient_zero = malicious_alerts[0].host_id
+    lateral_targets = sorted(h for h in malicious_hosts if h != patient_zero)
+
+    # Crown jewel: prefer a host explicitly configured as a crown jewel via known_iocs,
+    # else fall back to a clean (non-malicious) host so containment scoring is meaningful,
+    # else (last resort, old behavior) just take the last host id.
+    crown_jewel_iocs = {_host_id(v) for v in ioc_table.get("crown_jewel", set())}
+    configured_crown_jewels = [h for h in host_ids if h in crown_jewel_iocs]
+    clean_hosts = [h for h in host_ids if h not in malicious_hosts]
+    if configured_crown_jewels:
+        crown_jewel = configured_crown_jewels[0]
+    elif clean_hosts:
+        crown_jewel = clean_hosts[0]
+    else:
+        crown_jewel = host_ids[-1]
+
     stages = sorted({a.mitre_tactic.value for a in malicious_alerts if a.mitre_tactic})
+    if not stages:
+        return None
 
     return {
         "alerts": [a.model_dump(mode="json") for a in alerts],

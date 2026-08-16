@@ -176,15 +176,15 @@
     }
   ],
   "attack_chain": {
-    "patient_zero_host": "HOST-10-0-1-11",
+    "patient_zero_host": "HOST-198-51-100-77",
     "stages": [
       "credential_access",
       "exfiltration"
     ],
     "lateral_movement_targets": [
-      "HOST-198-51-100-77"
+      "HOST-10-0-1-11"
     ],
-    "crown_jewel_host": "HOST-198-51-100-77",
+    "crown_jewel_host": "HOST-10-0-1-12",
     "exfiltration_complete": false,
     "attacker_dwell_minutes": 45
   }

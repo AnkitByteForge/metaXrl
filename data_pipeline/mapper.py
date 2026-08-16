@@ -52,7 +52,11 @@ def to_siem_alert(event: RawEvent, index: int, ioc_table: Dict[str, Set[str]]) -
         user_id=event.user,
         mitre_tactic=_tactic_for(event, malicious),
         indicators=[
-            ThreatIndicator(type=kind, value=value, reputation="malicious" if malicious else "unknown")
+            ThreatIndicator(
+                type=kind,
+                value=value,
+                reputation="malicious" if value in ioc_table.get(kind, set()) else "unknown",
+            )
             for kind, value in event.indicators
             if kind in ("ip", "hash", "domain", "user")
         ],

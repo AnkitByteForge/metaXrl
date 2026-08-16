@@ -20,7 +20,7 @@
         {
           "type": "ip",
           "value": "10.0.2.10",
-          "reputation": "malicious",
+          "reputation": "unknown",
           "context": null
         }
       ],
