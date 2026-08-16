@@ -55,6 +55,13 @@ TASK_METADATA = [
         "name": "Constrained incident response",
         "description": "Respond to an active breach while respecting legal hold, customer-facing, and hard-block constraints.",
     },
+    {
+        "id": "real_world_incident",
+        "difficulty": "medium",
+        "max_steps": 25,
+        "name": "Real-world incident",
+        "description": "Same attack-chain task, backed by real log data converted from the Splunk BOTS dataset instead of a fixed scenario.",
+    },
 ]
 
 
